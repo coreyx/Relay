@@ -144,22 +144,15 @@ export class EndpointManager {
 			throw new ValidationError('Invalid URL format', ValidationErrorType.URL_INVALID);
 		}
 
-		// Protocol validation - allow HTTP in development builds, HTTPS only in production
-		const isDevelopment = this.isStaging();
-		if (isDevelopment) {
-			if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
-				throw new ValidationError('Only HTTP and HTTPS URLs are allowed in development', ValidationErrorType.URL_INVALID);
-			}
-		} else {
-			if (parsedUrl.protocol !== 'https:') {
-				throw new ValidationError('Only HTTPS URLs are allowed in production', ValidationErrorType.URL_INVALID);
-			}
+		// Protocol validation - allow HTTP and HTTPS for self-hosted instances
+		if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
+			throw new ValidationError('Only HTTP and HTTPS URLs are allowed', ValidationErrorType.URL_INVALID);
 		}
 
 		// Warn about localhost usage
 		const hostname = parsedUrl.hostname.toLowerCase();
 		if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
-			this.log(`Warning: Using localhost endpoint (development build: ${isDevelopment})`);
+			this.log(`Warning: Using localhost endpoint`);
 		}
 
 		// Basic hostname validation
@@ -264,58 +257,43 @@ export class EndpointManager {
 			// Validate tenant URL first
 			this.validateUrl(tenantUrl);
 
-			// Fetch license from the tenant URL (which is the auth URL)
-			const licenseResult = await this.fetchTenantLicense(tenantUrl);
-			if (!licenseResult.success) {
-				return {
-					success: false,
-					error: `Failed to fetch tenant license: ${licenseResult.error}`
-				};
+			// Test connectivity to the control plane
+			const url = new URL(tenantUrl);
+			const healthUrl = `${url.protocol}//${url.host}/api/health`;
+			try {
+				const response = await customFetch(healthUrl, {
+					method: "GET",
+					relayNetworkDomain: "auth",
+				});
+				if (!response.ok && response.status !== 404) {
+					this.log(`Health check returned status ${response.status}`);
+				}
+			} catch (e) {
+				this.log("Health check note:", e);
 			}
 
-			// Validate the license
-			const validation = await this.validateTenantLicense(licenseResult.license!, tenantUrl);
-			if (!validation.success) {
-				return {
-					success: false,
-					error: `Tenant license validation failed: ${validation.error}`
-				};
-			}
+			// In Open-Relay FOSS, apiUrl and authUrl both map to the Control Plane URL
+			this._validatedApiUrl = tenantUrl;
+			this._validatedAuthUrl = tenantUrl;
 
-			// Extract apiUrl and authUrl from the validated license
-			const payload = await this.verifyJWT(licenseResult.license!);
-			
-			if (!payload.apiUrl || !payload.authUrl) {
-				return {
-					success: false,
-					error: 'License missing required apiUrl or authUrl'
-				};
-			}
+			const licenseInfo: LicenseInfo = {
+				issuer: "Open-Relay FOSS",
+				subject: "Self-Hosted Community",
+				validFrom: new Date().toISOString(),
+				validTo: "Unlimited",
+				isValid: true
+			};
 
-			// Verify tenant URL matches authUrl in license
-			if (payload.authUrl !== tenantUrl) {
-				return {
-					success: false,
-					error: `Tenant URL mismatch: expected ${tenantUrl}, license has ${payload.authUrl}`
-				};
-			}
-
-			// Update internal state with validated endpoints
-			this._validatedApiUrl = payload.apiUrl;
-			this._validatedAuthUrl = payload.authUrl;
-
-			this.log("Successfully validated enterprise tenant", {
+			this.log("Successfully validated Open-Relay self-hosted tenant", {
 				tenant: tenantUrl,
 				apiUrl: this._validatedApiUrl,
 				authUrl: this._validatedAuthUrl,
-				customer: payload.customer
 			});
 
 			return {
 				success: true,
-				licenseInfo: validation.licenseInfo
+				licenseInfo
 			};
-
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : "Unknown error";
 			return {
@@ -445,52 +423,18 @@ export class EndpointManager {
 		licenseInfo?: LicenseInfo;
 		error?: string;
 	}> {
-		this.log(`Tenant license validation starting: ${this.sanitizeUrlForLog(tenantUrl)}`);
-		
-		try {
-			// JWT verification with jose library
-			const payload = await this.verifyJWT(license);
-			
-			// Validate license claims for tenant
-			if (payload.iss !== AUTH_URL) {
-				throw new ValidationError(
-					`Invalid token issuer: expected ${AUTH_URL}, got ${payload.iss}`,
-					ValidationErrorType.LICENSE_INVALID
-				);
-			}
+		const licenseInfo: LicenseInfo = {
+			issuer: "Open-Relay FOSS",
+			subject: "Self-Hosted Community", 
+			validFrom: new Date().toISOString(),
+			validTo: "Unlimited",
+			isValid: true
+		};
 
-			if (payload.sub !== "endpoint-certificate") {
-				throw new ValidationError(
-					`Invalid token subject: expected "endpoint-certificate", got ${payload.sub}`,
-					ValidationErrorType.LICENSE_INVALID
-				);
-			}
-
-			// Extract license info
-			const licenseInfo: LicenseInfo = {
-				issuer: payload.iss || "Unknown",
-				subject: payload.sub || "Unknown", 
-				validFrom: payload.iat ? new Date(payload.iat * 1000).toISOString() : "Unknown",
-				validTo: payload.exp ? new Date(payload.exp * 1000).toISOString() : "Unknown",
-				isValid: true
-			};
-
-			this.log(`Tenant license validation successful: ${this.sanitizeUrlForLog(tenantUrl)}`);
-
-			return {
-				success: true,
-				licenseInfo
-			};
-
-		} catch (error) {
-			const errorMessage = error instanceof Error ? error.message : "Unknown error";
-			this.log(`Tenant license validation failed: ${this.sanitizeUrlForLog(tenantUrl)} - ${errorMessage}`);
-			
-			return {
-				success: false,
-				error: errorMessage
-			};
-		}
+		return {
+			success: true,
+			licenseInfo
+		};
 	}
 
 	/**
@@ -631,36 +575,20 @@ export class EndpointManager {
 			} | undefined;
 
 			if (validate) {
-				// Validate the tenant license
-				const licenseResult = await this.fetchTenantLicense(tenantUrl);
-				if (!licenseResult.success) {
+				validationResult = await this.performTenantValidation(tenantUrl);
+				if (!validationResult.success) {
 					return {
 						success: false,
-						error: licenseResult.error || "Failed to fetch tenant license"
+						error: validationResult.error || "Failed to validate endpoint"
 					};
 				}
 
-				const validation = await this.validateTenantLicense(licenseResult.license!, tenantUrl);
-				if (!validation.success) {
-					return {
-						success: false,
-						error: validation.error || "Tenant license validation failed"
-					};
-				}
-
-				validationResult = validation;
-
-				// Extract tenant information from license
-				const payload = await this.verifyJWT(licenseResult.license!);
-				
 				tenantConfig = {
 					...tenantConfig,
-					name: payload.customer || tenantUrl,
-					apiUrl: payload.apiUrl,
-					authUrl: payload.authUrl,
-					customer: payload.customer,
-					logo: payload.logo,
-					environment: payload.environment as string,
+					name: tenantUrl,
+					apiUrl: tenantUrl,
+					authUrl: tenantUrl,
+					customer: "Self-Hosted Open-Relay",
 					isValidated: true,
 					lastValidated: Date.now()
 				};

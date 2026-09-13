@@ -87,7 +87,8 @@ interface RelayDAO extends RecordModel {
 	name: string;
 	version: number;
 	path: string;
-	user_limit: number;
+	user_limit?: number;
+	userLimit?: number;
 	creator: string;
 	cta: string;
 	plan: string;
@@ -99,10 +100,14 @@ interface ProviderDAO extends RecordModel {
 	id: string;
 	url: string;
 	name: string;
-	self_hosted: boolean;
-	public_key: string;
-	key_type: string;
-	key_id: string;
+	self_hosted?: boolean;
+	selfHosted?: boolean;
+	public_key?: string;
+	publicKey?: string;
+	key_type?: string;
+	keyType?: string;
+	key_id?: string;
+	keyId?: string;
 }
 
 interface RemoteFolderDAO extends RecordModel {
@@ -137,7 +142,8 @@ export interface StorageQuotaDAO extends RecordModel {
 	usage: number;
 	pending?: number;
 	metered: boolean;
-	max_file_size: number;
+	max_file_size?: number;
+	maxFileSize?: number;
 }
 
 interface RelayInvitationDAO extends RecordModel {
@@ -278,7 +284,11 @@ class StorageQuotaAuto
 	}
 
 	public get maxFileSize(): number {
-		return this.storageQuota.max_file_size;
+		return (
+			this.storageQuota.max_file_size ??
+			this.storageQuota.maxFileSize ??
+			262144000
+		);
 	}
 
 	public get metered(): boolean {
@@ -405,20 +415,36 @@ class ProviderAuto extends Observable<Provider> implements Provider {
 		return this.provider.url;
 	}
 
-	public get selfHosted() {
-		return this.provider.self_hosted;
+	public get selfHosted(): boolean {
+		return (
+			this.provider.self_hosted ??
+			this.provider.selfHosted ??
+			false
+		);
 	}
 
-	public get publicKey() {
-		return this.provider.public_key;
+	public get publicKey(): string {
+		return (
+			this.provider.public_key ??
+			this.provider.publicKey ??
+			""
+		);
 	}
 
-	public get keyType() {
-		return this.provider.key_type;
+	public get keyType(): string {
+		return (
+			this.provider.key_type ??
+			this.provider.keyType ??
+			""
+		);
 	}
 
-	public get keyId() {
-		return this.provider.key_id;
+	public get keyId(): string {
+		return (
+			this.provider.key_id ??
+			this.provider.keyId ??
+			""
+		);
 	}
 
 	public update(update: ProviderDAO): Provider {
@@ -501,12 +527,19 @@ class RemoteFolderAuto
 		return this.remoteFolder.private;
 	}
 
-	public get creator() {
+	public get creator(): RelayUser {
 		const user = this.users.get(this.remoteFolder.creator);
-		if (!user) {
-			throw new Error("invalid remote folder");
+		if (user) {
+			return user;
 		}
-		return user;
+		const expandCreator = (this.remoteFolder as any)?.expand?.creator;
+		return {
+			id: this.remoteFolder.creator,
+			name: expandCreator?.name || expandCreator?.email || "Collaborator",
+			email: expandCreator?.email || "",
+			picture: expandCreator?.picture || "",
+			update: (u: any) => u,
+		} as unknown as RelayUser;
 	}
 
 	public get creatorId() {
@@ -516,7 +549,10 @@ class RemoteFolderAuto
 	public get relay(): Relay {
 		const relay = this.relays.get(this.remoteFolder.relay);
 		if (!relay) {
-			throw new Error("invalid remote folder");
+			console.debug(
+				`[RemoteFolder] Relay ${this.remoteFolder.relay} not found in store`,
+			);
+			return undefined as unknown as Relay;
 		}
 		return relay;
 	}
@@ -565,6 +601,8 @@ class RemoteFolderAuto
 			})?.id;
 			if (folderRoleId) {
 				parents.push(["shared_folder_roles", folderRoleId]);
+			} else if (this.remoteFolder.creator === this.user.id) {
+				parents.push(["users", this.user.id]);
 			}
 		} else {
 			// For public folders, relay role grants access
@@ -1168,10 +1206,17 @@ class RelayRoleAuto extends Auto implements RelayRole {
 
 	public get user(): RelayUser {
 		const user = this.users.get(this.relayRole.user);
-		if (!user) {
-			throw new Error(`Unable to find user: ${this.relayRole.user}`);
+		if (user) {
+			return user;
 		}
-		return user;
+		const expandUser = (this.relayRole as any)?.expand?.user;
+		return {
+			id: this.relayRole.user,
+			name: expandUser?.name || expandUser?.email || "Collaborator",
+			email: expandUser?.email || "",
+			picture: expandUser?.picture || "",
+			update: (u: any) => u,
+		} as unknown as RelayUser;
 	}
 
 	public get role(): Role {
@@ -1185,9 +1230,10 @@ class RelayRoleAuto extends Auto implements RelayRole {
 	public get relay(): Relay {
 		const relay = this.relays.get(this.relayRole.relay);
 		if (!relay) {
-			throw new Error(
-				`invalid role: unable to find relay ${this.relayRole.relay} on role ${this.relayRole.id}`,
+			console.debug(
+				`[RelayRole] Relay ${this.relayRole.relay} not found in store for role ${this.relayRole.id}`,
 			);
+			return undefined as unknown as Relay;
 		}
 		return relay;
 	}
@@ -1226,10 +1272,17 @@ class FolderRoleAuto extends Auto implements FolderRole {
 
 	public get user(): RelayUser {
 		const user = this.users.get(this.folderRole.user);
-		if (!user) {
-			throw new Error(`Unable to find user: ${this.folderRole.user}`);
+		if (user) {
+			return user;
 		}
-		return user;
+		const expandUser = (this.folderRole as any)?.expand?.user;
+		return {
+			id: this.folderRole.user,
+			name: expandUser?.name || expandUser?.email || "Collaborator",
+			email: expandUser?.email || "",
+			picture: expandUser?.picture || "",
+			update: (u: any) => u,
+		} as unknown as RelayUser;
 	}
 
 	public get role(): Role {
@@ -1243,9 +1296,10 @@ class FolderRoleAuto extends Auto implements FolderRole {
 	public get sharedFolder(): RemoteSharedFolder {
 		const folder = this.remoteFolders.get(this.folderRole.shared_folder);
 		if (!folder) {
-			throw new Error(
-				`invalid role: unable to find folder ${this.folderRole.shared_folder} on role ${this.folderRole.id}`,
+			console.debug(
+				`[FolderRole] Folder ${this.folderRole.shared_folder} not found in store for role ${this.folderRole.id}`,
 			);
+			return undefined as unknown as RemoteSharedFolder;
 		}
 		return folder;
 	}
@@ -1298,7 +1352,10 @@ class RelayInvitationAuto implements RelayInvitation {
 	public get relay(): Relay {
 		const relay = this.relays.get(this.relayInvitation.relay);
 		if (!relay) {
-			throw new Error("invalid invitation");
+			console.debug(
+				`[RelayInvitation] Relay ${this.relayInvitation.relay} not found in store`,
+			);
+			return undefined as unknown as Relay;
 		}
 		return relay;
 	}
@@ -1355,7 +1412,16 @@ export class RelaySubscriptionAuto
 	public get user(): RelayUser {
 		const user = this.users.get(this.subscription.user);
 		if (!user) {
-			throw new Error("invalid subscription");
+			console.debug(
+				`[RelaySubscription] User ${this.subscription.user} not found in store`,
+			);
+			return {
+				id: this.subscription.user,
+				name: "Owner",
+				email: "",
+				picture: "",
+				update: (u: any) => u,
+			} as unknown as RelayUser;
 		}
 		return user;
 	}
@@ -1367,7 +1433,10 @@ export class RelaySubscriptionAuto
 	public get relay(): Relay {
 		const relay = this.relays.get(this.subscription.relay);
 		if (!relay) {
-			throw new Error("invalid subscription");
+			console.debug(
+				`[RelaySubscription] Relay ${this.subscription.relay} not found in store`,
+			);
+			return undefined as unknown as Relay;
 		}
 		return relay;
 	}
@@ -1442,12 +1511,18 @@ class RelayAuto
 		this.relay.name = value;
 	}
 
-	public get version() {
-		return this.relay.version;
+	public get version(): number {
+		return (this.relay.version && this.relay.version > 0)
+			? this.relay.version
+			: 1;
 	}
 
-	public get userLimit() {
-		return this.relay.user_limit;
+	public get userLimit(): number {
+		return (
+			this.relay.user_limit ??
+			(this.relay as any).userLimit ??
+			0
+		);
 	}
 
 	public get role(): Role {
@@ -1597,7 +1672,9 @@ export class RelayManager extends HasLogging {
 
 		this.buildGraph();
 		void this.subscribe();
-		void this.update();
+		void this.update().catch((e) => {
+			console.debug("[RelayManager] Initial update omitted:", e);
+		});
 	}
 
 	buildGraph() {
@@ -1729,7 +1806,9 @@ export class RelayManager extends HasLogging {
 		this.setUser();
 		this.buildGraph();
 		void this.subscribe();
-		void this.update();
+		void this.update().catch((e) => {
+			console.debug("[RelayManager] Login update omitted:", e);
+		});
 	}
 
 	logout() {
@@ -1834,6 +1913,25 @@ export class RelayManager extends HasLogging {
 			this.store?.delete(e.record);
 		} else {
 			this.store?.ingest(e.record);
+			if (this.pb && e.record) {
+				const userId = (e.record.user || e.record.creator) as string | undefined;
+				if (userId && typeof userId === "string" && !this.users.get(userId)) {
+					this.pb
+						.collection("users")
+						.getOne<UserDAO>(userId)
+						.then((userRecord) => {
+							if (!this.destroyed && this.store) {
+								this.store.ingest(userRecord);
+							}
+						})
+						.catch((err) => {
+							console.debug(
+								"[RelayManager] Could not fetch missing user from event:",
+								err,
+							);
+						});
+				}
+			}
 		}
 	};
 
@@ -1877,12 +1975,19 @@ export class RelayManager extends HasLogging {
 		this._isSubscribed = true;
 
 		for (const collection of collections) {
-			void this.pb
-				.collection(collection.name)
-				.subscribe("*", (e) => this._handleEvent(collection.name, e), {
-					expand: collection.expand.join(","),
-					fetch: customFetch,
-				});
+			try {
+				void this.pb
+					.collection(collection.name)
+					.subscribe("*", (e) => this._handleEvent(collection.name, e), {
+						expand: collection.expand.join(","),
+						fetch: customFetch,
+					})
+					.catch((err) => {
+						console.debug(`[RelayManager] Realtime subscribe skipped for ${collection.name}:`, err);
+					});
+			} catch (e) {
+				console.debug(`[RelayManager] Error subscribing to ${collection.name}:`, e);
+			}
 		}
 	}
 
@@ -1994,7 +2099,7 @@ export class RelayManager extends HasLogging {
 	}
 
 	async update() {
-		const withPb = (
+		const withPb = async (
 			collection: string,
 			options:
 				| ((userId: string) => RecordFullListOptions)
@@ -2005,12 +2110,17 @@ export class RelayManager extends HasLogging {
 				!this.pb.authStore.isValid ||
 				this.pb.authStore.model?.id === undefined
 			) {
-				return Promise.resolve([]);
+				return [];
 			}
 			if (typeof options === "function") {
 				options = options(this.pb.authStore.model.id as string);
 			}
-			return this.pb.collection(collection).getFullList<RecordModel>(options);
+			try {
+				return await this.pb.collection(collection).getFullList<RecordModel>(options);
+			} catch (err) {
+				console.debug(`[RelayManager] Collection '${collection}' unavailable or empty:`, err);
+				return [];
+			}
 		};
 
 		const promises = [
@@ -2023,9 +2133,15 @@ export class RelayManager extends HasLogging {
 					"relay_roles_via_user.role",
 				].join(","),
 			})),
-			withPb("relay_roles", {
+			withPb("relays", (userId) => ({
+				filter: `relay_roles_via_relay.user ?= "${userId}"`,
+				expand: "relay_roles_via_relay,shared_folders_via_relay,storage_quota",
+			})),
+			withPb("relay_roles", (userId) => ({
+				filter: `user = "${userId}" || relay.relay_roles_via_relay.user ?= "${userId}"`,
 				expand: "user,role",
-			}),
+			})),
+			withPb("roles"),
 			withPb("providers"),
 			withPb("relay_invitations"),
 			withPb("shared_folders", {
@@ -2039,11 +2155,15 @@ export class RelayManager extends HasLogging {
 			}),
 		];
 		await Promise.all(promises.map(async (promise) => {
-			const result = await promise;
-			for (const record of result) {
-				if (!this.destroyed && this.store) {
-					this.store.ingest(record);
+			try {
+				const result = await promise;
+				for (const record of result) {
+					if (!this.destroyed && this.store) {
+						this.store.ingest(record);
+					}
 				}
+			} catch (e) {
+				console.debug("[RelayManager] Record ingest omitted:", e);
 			}
 		}));
 	}
@@ -2076,7 +2196,7 @@ export class RelayManager extends HasLogging {
 		const record = await this.pb?.collection("relays").create<RelayDAO>(
 			{
 				guid: guid,
-				name: name,
+				name: name.trim() || "Untitled Relay Server",
 				path: null,
 			},
 			{
@@ -2188,6 +2308,13 @@ export class RelayManager extends HasLogging {
 		const folder = this.store?.ingest<RemoteFolder>(record);
 		if (!folder) {
 			throw new Error("Failed to create folder");
+		}
+		if (this.user?.id) {
+			try {
+				await this.addFolderRole(folder, this.user.id, "Owner");
+			} catch (e) {
+				console.debug("[RelayManager] Folder owner role creation omitted:", e);
+			}
 		}
 		return folder;
 	}

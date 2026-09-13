@@ -24,7 +24,9 @@ interface Serializable {
 }
 
 export function hasPermissionParents(item: HasPermissionParents) {
-	return Array.isArray(item.permissionParents);
+	return (
+		Array.isArray(item.permissionParents) && item.permissionParents.length > 0
+	);
 }
 
 export type Permission =

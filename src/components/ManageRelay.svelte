@@ -124,7 +124,7 @@
 	}
 
 	function formatBytes(bytes: number, decimals = 2) {
-		if (bytes === 0) return "0 MB";
+		if (typeof bytes !== "number" || isNaN(bytes) || bytes <= 0) return "0 MB";
 
 		const k = 1024;
 		const sizes = ["Bytes", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"];
@@ -144,7 +144,7 @@
 		if (a.role !== "Owner" && b.role === "Owner") {
 			return 1;
 		}
-		return a.user.name > b.user.name ? 1 : -1;
+		return (a.user?.name || "") > (b.user?.name || "") ? 1 : -1;
 	}
 
 	// Dynamic role loading for forwards compatibility
@@ -208,6 +208,10 @@
 						: "",
 				},
 			});
+
+			if (!response.ok) {
+				throw new Error(`Failed to load configuration (HTTP ${response.status})`);
+			}
 
 			// Get the text from the response
 			const tomlTemplate = await response.text();
@@ -739,8 +743,12 @@
 	{/each}
 
 	<SettingItem description="" name="">
-		<span class="faint"
-			>{$roles.values().length} of {$relay.userLimit} seats used
+		<span class="faint">
+			{#if $relay.userLimit && $relay.userLimit > 0}
+				{$roles.values().length} of {$relay.userLimit} seats used
+			{:else}
+				{$roles.values().length} seat{$roles.values().length === 1 ? "" : "s"} used (Unlimited)
+			{/if}
 		</span>
 	</SettingItem>
 </SettingGroup>

@@ -126,6 +126,9 @@
 		// Set the remote connection to ensure proper relay association
 		folder.remote = remoteFolder;
 
+		void folder.connect();
+		plugin.sharedFolders.notifyListeners();
+
 		return folder;
 	}
 
@@ -154,8 +157,14 @@
 		let noFoldersMessage: string | undefined;
 		if (availableFolders.length === 0) {
 			if (totalRemoteFolders === 0) {
-				noFoldersMessage =
-					"Join a Relay Server, or add a Shared Folder on another device.";
+				const hasRelays = $relays.values().length > 0;
+				if (hasRelays) {
+					noFoldersMessage =
+						"No shared folders are available. If folders exist on this server, ensure they are public or that you have been granted access.";
+				} else {
+					noFoldersMessage =
+						"Join a Relay Server, or add a Shared Folder on another device.";
+				}
 			} else {
 				noFoldersMessage = "All remote folders are already in your vault.";
 			}

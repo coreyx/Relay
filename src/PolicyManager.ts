@@ -337,6 +337,62 @@ export class PolicyManager implements IPolicyManager {
 		});
 
 		this.registerPolicy({
+			permission: ["folder", "make_private"],
+			description: "Convert a public folder to private",
+			dependencies: {
+				folder_roles: (role: FolderRole, request) =>
+					!!(
+						role.sharedFolderId === this.getResourceId(request.resource) &&
+						role.userId === request.principal
+					),
+				relay_roles: (role: RelayRole, request) => {
+					const folder = this.relayManager.remoteFolders.get(
+						this.getResourceId(request.resource),
+					);
+					return !!(
+						folder &&
+						role.relayId === folder.relayId &&
+						role.userId === request.principal
+					);
+				},
+				shared_folders: (folder: RemoteSharedFolder, request) =>
+					!!(folder.id === this.getResourceId(request.resource)),
+			},
+			evaluate: (request: AuthorizationRequest): boolean => {
+				const folderId = this.getResourceId(request.resource);
+				return this.hasFolderManagementAccess(request.principal, folderId);
+			},
+		});
+
+		this.registerPolicy({
+			permission: ["folder", "manage_users"],
+			description: "Manage users in shared folder",
+			dependencies: {
+				folder_roles: (role: FolderRole, request) =>
+					!!(
+						role.sharedFolderId === this.getResourceId(request.resource) &&
+						role.userId === request.principal
+					),
+				relay_roles: (role: RelayRole, request) => {
+					const folder = this.relayManager.remoteFolders.get(
+						this.getResourceId(request.resource),
+					);
+					return !!(
+						folder &&
+						role.relayId === folder.relayId &&
+						role.userId === request.principal
+					);
+				},
+				shared_folders: (folder: RemoteSharedFolder, request) =>
+					!!(folder.id === this.getResourceId(request.resource)),
+			},
+			evaluate: (request: AuthorizationRequest): boolean => {
+				const folderId = this.getResourceId(request.resource);
+				return this.hasFolderManagementAccess(request.principal, folderId);
+			},
+		});
+
+		this.registerPolicy({
 			permission: ["folder", "read_content"],
 			description: "Read folder contents and add to vault",
 			dependencies: {
@@ -633,13 +689,17 @@ export class PolicyManager implements IPolicyManager {
 			return true;
 		}
 
-		// For private folders, only folder owners can manage
+		// Folder creator always has management access
+		if (this.isFolderCreator(userId, folderId)) {
+			return true;
+		}
+
+		// For private folders, folder owners can manage
 		if (folder.private) {
 			return this.hasFolderRole(userId, folderId, ["Owner"]);
 		}
 
-		// For public folders, creator can manage
-		return this.isFolderCreator(userId, folderId);
+		return false;
 	}
 
 	private getUserFolderRole(userId: string, folderId: string): string | null {

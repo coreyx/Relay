@@ -134,10 +134,12 @@
 	let noStorage = derived(
 		[folderStore, relayRoles],
 		([$folderStore, $relayRoles]) => {
-			return (
-				$relayRoles.find((role) => role.relay === $folderStore?.remote?.relay)
-					?.relay?.storageQuota?.quota === 0
+			const targetRelayId =
+				$folderStore?.remote?.relayId || $folderStore?.remote?.relay?.id;
+			const matchingRole = $relayRoles.find(
+				(role) => role.relayId === targetRelayId,
 			);
+			return matchingRole?.relay?.storageQuota?.quota === 0;
 		},
 	);
 
@@ -286,6 +288,21 @@
 			handleServerError(
 				error,
 				"Failed to make folder private. Permission denied.",
+			);
+		}
+	}
+
+	async function handleMakePublic() {
+		try {
+			await plugin.relayManager.updateFolderPrivacy(
+				remoteFolder,
+				false,
+			);
+			new Notice("Folder is now accessible to all Relay Server members.");
+		} catch (error) {
+			handleServerError(
+				error,
+				"Failed to make folder public.",
 			);
 		}
 	}
@@ -633,7 +650,16 @@
 	<SettingGroup>
 		{#if $relayStore}
 			{#if $canMakeFolderPrivate}
-				{#if !remoteFolder?.private && remoteFolder?.relay.version > 0}
+				{#if remoteFolder?.private}
+					<SettingItem
+						name="Make public"
+						description="Allow all members of this Relay Server to access this folder"
+					>
+						<button class="mod-cta" on:click={debounce(handleMakePublic)}>
+							Make public
+						</button>
+					</SettingItem>
+				{:else if remoteFolder?.relay.version > 0}
 					<SettingItem
 						name="Make private"
 						description="Convert this folder to a private folder and manage access"

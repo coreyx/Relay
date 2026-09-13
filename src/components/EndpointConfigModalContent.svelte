@@ -52,15 +52,9 @@
 			const parsed = new URL(url);
 			const isDevelopment = plugin.loginManager.getEndpointManager().isStaging();
 			
-			// Protocol validation - allow HTTP in development builds, HTTPS only in production
-			if (isDevelopment) {
-				if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-					return { isValid: false, error: 'Only HTTP and HTTPS URLs are allowed in development' };
-				}
-			} else {
-				if (parsed.protocol !== 'https:') {
-					return { isValid: false, error: 'Only HTTPS URLs are allowed in production' };
-				}
+			// Protocol validation - allow HTTP and HTTPS for self-hosted instances
+			if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+				return { isValid: false, error: 'Only HTTP and HTTPS URLs are allowed' };
 			}
 			
 			if (parsed.hostname.length < 3) {

@@ -41,6 +41,8 @@
 	let providers: Record<string, Provider> = {};
 	let hasProviderInfo = writable<boolean>(false);
 	const loginSettings = lm.loginSettings;
+	let emailInput = "";
+	let passwordInput = "";
 
 	// Load cached providers from localStorage, keyed by auth URL
 	let cachedProviders = writable<string[]>([]);
@@ -74,8 +76,8 @@
 		} catch (e) {
 			errorLog("Failed to load cached providers:", e);
 		}
-		// Return default providers if no cache exists
-		return getDefaultProviders();
+		// Return empty list if no cache exists (will be populated from API if configured)
+		return [];
 	}
 
 	function saveCachedProviders(providerList: string[]) {
@@ -113,10 +115,13 @@
 			// Fall back to selectedProvider for compatibility
 			if ($selectedProvider !== "") return [$selectedProvider];
 
-			// If we have provider info from the API, only show those that are available
-			if ($hasProviderInfo && Object.keys(providers).length > 0) {
-				// Filter to only show providers that were returned from the API
+			// If we have provider info from the API, only show those that are actually available
+			if ($hasProviderInfo) {
 				const availableFromApi = Object.keys(providers);
+				if (availableFromApi.length === 0) {
+					saveCachedProviders([]);
+					return [];
+				}
 				const visible = [];
 
 				// Check each provider in preferred order
@@ -143,15 +148,7 @@
 					}
 				});
 
-				// Check if the list has changed from what we expected (cached or defaults)
-				const hasChanged =
-					JSON.stringify(visible.sort()) !==
-					JSON.stringify($cachedProviders.sort());
-				shouldAnimate.set(hasChanged);
-
-				// Save to cache for next time
 				saveCachedProviders(visible);
-
 				return visible;
 			}
 
@@ -160,14 +157,8 @@
 				return $cachedProviders;
 			}
 
-			// Default behavior if no provider info yet or request failed
-			const visible = ["github", "google", "microsoft"];
-
-			if ($flagManager.getFlag("enableDiscordLogin")) {
-				visible.push("discord");
-			}
-
-			return visible;
+			// If no provider info has arrived yet, do not assume external OAuth providers
+			return [];
 		},
 	);
 
@@ -245,12 +236,15 @@
 					lm.updateWebviewIntercepts(providers_);
 				})
 				.catch((e) => {
+					if (e && e.message && e.message.toLowerCase().includes("no valid providers")) {
+						hasProviderInfo.set(true);
+						return;
+					}
 					let message = e.message;
 					message = message;
 					error.set(message);
 					success.set(false);
 					selectedProvider.set("");
-					throw e;
 				});
 		} catch (e: any) {
 			error.set(e.message);
@@ -303,6 +297,34 @@
 		if (s == "github") return "GitHub";
 		return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
 	}
+
+	async function handlePasswordLogin() {
+		if (!emailInput || !passwordInput || $pending) return;
+		pending.set(true);
+		error.set("");
+		try {
+			const ok = await plugin.loginManager.loginWithPassword(emailInput, passwordInput);
+			if (ok) success.set(true);
+		} catch (e: any) {
+			error.set(e?.message || "Login failed");
+		} finally {
+			pending.set(false);
+		}
+	}
+
+	async function handlePasswordRegister() {
+		if (!emailInput || !passwordInput || $pending) return;
+		pending.set(true);
+		error.set("");
+		try {
+			const ok = await plugin.loginManager.registerWithPassword(emailInput, passwordInput);
+			if (ok) success.set(true);
+		} catch (e: any) {
+			error.set(e?.message || "Sign up failed");
+		} finally {
+			pending.set(false);
+		}
+	}
 </script>
 
 {#if $lm.hasUser && $lm.user}
@@ -325,60 +347,124 @@
 	{/if}
 	<div class="welcome">
 		<WelcomeHeader />
-		{#if $automaticFlow}
-			<div class="login-buttons">
-				{#each $visibleProviders as provider (provider)}
-					<button
-						class={`${provider.startsWith("oidc") ? "oidc" : provider}-sign-in-button`}
-						disabled={$pending || !$configuredProviders.contains(provider)}
-						transition:slide={{
-							duration: $shouldAnimate ? 300 : 0,
-							easing: quintOut,
-						}}
-						on:click={debounce(async () => {
-							pending.set(true);
-							await login(provider);
-						})}
-						>Sign in with {$providerDisplayNames[provider] ||
-							capitalize(provider)}</button
-					>
-				{/each}
-			</div>
-		{:else}
-			<div class="login-buttons">
-				{#each $visibleProviders as provider (provider)}
-					{#if providers[provider]}
-						<a href={providers[provider].fullAuthUrl} target="_blank">
-							<button
-								class={`${provider.startsWith("oidc") ? "oidc" : provider}-sign-in-button`}
-								disabled={$pending || !providers[provider]}
-								transition:slide={{
-									duration: $shouldAnimate ? 300 : 0,
-									easing: quintOut,
-								}}
-								on:click={() => {
-									pending.set(true);
-									poll(provider);
-								}}
-								>Sign in with {$providerDisplayNames[provider] ||
-									capitalize(provider)}</button
-							>
-						</a>
-					{:else}
+		{#if $visibleProviders && $visibleProviders.length > 0}
+			{#if $automaticFlow}
+				<div class="login-buttons">
+					{#each $visibleProviders as provider (provider)}
 						<button
 							class={`${provider.startsWith("oidc") ? "oidc" : provider}-sign-in-button`}
-							disabled={true}
+							disabled={$pending || !$configuredProviders.contains(provider)}
 							transition:slide={{
 								duration: $shouldAnimate ? 300 : 0,
 								easing: quintOut,
 							}}
+							on:click={debounce(async () => {
+								pending.set(true);
+								await login(provider);
+							})}
 							>Sign in with {$providerDisplayNames[provider] ||
 								capitalize(provider)}</button
 						>
-					{/if}
-				{/each}
-			</div>
+					{/each}
+				</div>
+			{:else}
+				<div class="login-buttons">
+					{#each $visibleProviders as provider (provider)}
+						{#if providers[provider]}
+							<a href={providers[provider].fullAuthUrl} target="_blank">
+								<button
+									class={`${provider.startsWith("oidc") ? "oidc" : provider}-sign-in-button`}
+									disabled={$pending || !providers[provider]}
+									transition:slide={{
+										duration: $shouldAnimate ? 300 : 0,
+										easing: quintOut,
+									}}
+									on:click={() => {
+										pending.set(true);
+										poll(provider);
+									}}
+									>Sign in with {$providerDisplayNames[provider] ||
+										capitalize(provider)}</button
+								>
+							</a>
+						{:else}
+							<button
+								class={`${provider.startsWith("oidc") ? "oidc" : provider}-sign-in-button`}
+								disabled={true}
+								transition:slide={{
+									duration: $shouldAnimate ? 300 : 0,
+									easing: quintOut,
+								}}
+								>Sign in with {$providerDisplayNames[provider] ||
+									capitalize(provider)}</button
+							>
+						{/if}
+					{/each}
+				</div>
+			{/if}
 		{/if}
+
+		<!-- Self-Hosted / Password Login Section -->
+		<div class="foss-auth-box">
+			{#if $visibleProviders && $visibleProviders.length > 0}
+				<div class="foss-divider">
+					<span>or with email & password</span>
+				</div>
+			{:else}
+				<div class="foss-section-title">
+					<span>Sign in or create an account</span>
+				</div>
+			{/if}
+			<div class="foss-fields">
+				<input
+					type="email"
+					placeholder="Email address"
+					bind:value={emailInput}
+					class="foss-input"
+				/>
+				<input
+					type="password"
+					placeholder="Password"
+					bind:value={passwordInput}
+					class="foss-input"
+					on:keydown={async (e) => {
+						if (e.key === "Enter" && emailInput && passwordInput && !$pending) {
+							await handlePasswordLogin();
+						}
+					}}
+				/>
+				<div class="foss-actions">
+					<button
+						class="mod-cta foss-btn"
+						disabled={$pending || !emailInput || !passwordInput}
+						on:click={handlePasswordLogin}
+					>
+						Log In
+					</button>
+					<button
+						class="foss-btn"
+						disabled={$pending || !emailInput || !passwordInput}
+						on:click={handlePasswordRegister}
+					>
+						Sign Up
+					</button>
+				</div>
+				{#if !emailInput || !passwordInput}
+					<div class="foss-help-text">
+						Enter your email and password above to log in or register.
+					</div>
+				{/if}
+			</div>
+		</div>
+
+		<div class="foss-endpoint-link">
+			<button
+				class="link link-button"
+				on:click={() => plugin.openEndpointConfigurationModal()}
+			>
+				⚙️ Configure Relay Server ({plugin.loginManager.getEndpointManager().getAuthUrl()})
+			</button>
+		</div>
 		{#if $error}
 			<p>
 				{$error}.<br />
@@ -685,5 +771,81 @@
 		margin-bottom: 1rem;
 		font-size: 0.85em;
 		color: var(--text-normal);
+	}
+
+	.foss-auth-box {
+		width: 100%;
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+		margin-top: 0.5rem;
+	}
+
+	.foss-divider {
+		display: flex;
+		align-items: center;
+		text-align: center;
+		color: var(--text-muted);
+		font-size: 0.8em;
+	}
+
+	.foss-divider::before,
+	.foss-divider::after {
+		content: "";
+		flex: 1;
+		border-bottom: 1px solid var(--background-modifier-border);
+	}
+
+	.foss-divider span {
+		padding: 0 0.5rem;
+	}
+
+	.foss-fields {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.foss-input {
+		width: 100%;
+		padding: 8px 12px;
+		border: 1px solid var(--background-modifier-border);
+		border-radius: var(--radius-s);
+		background: var(--background-primary);
+		color: var(--text-normal);
+		font-size: 0.9em;
+	}
+
+	.foss-section-title {
+		text-align: center;
+		color: var(--text-muted);
+		font-size: 0.85em;
+		font-weight: 500;
+	}
+
+	.foss-help-text {
+		text-align: center;
+		color: var(--text-muted);
+		font-size: 0.78em;
+	}
+
+	.foss-actions {
+		display: flex;
+		gap: 0.5rem;
+	}
+
+	.foss-btn {
+		flex: 1;
+		padding: 6px 12px;
+	}
+
+	.foss-btn:disabled {
+		cursor: not-allowed;
+		opacity: 0.5;
+	}
+
+	.foss-endpoint-link {
+		margin-top: 0.5rem;
+		font-size: 0.8em;
 	}
 </style>

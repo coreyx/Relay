@@ -607,9 +607,10 @@ export class LoginManager extends Observable<LoginManager> {
 		}
 
 		if (Object.keys(providers).length === 0) {
-			throw new Error(
-				`No valid providers found from requested list: ${providerNames.join(", ")}`,
+			this.log(
+				`No OAuth providers configured on server from requested list: ${providerNames.join(", ")}`,
 			);
+			return {};
 		}
 
 		return providers;
@@ -661,6 +662,27 @@ export class LoginManager extends Observable<LoginManager> {
 			void this.pb.realtime.unsubscribe();
 			throw e;
 		}
+	}
+
+	async loginWithPassword(email: string, pass: string): Promise<boolean> {
+		this.beforeLogin();
+		try {
+			const authData = await this.pb.collection("users").authWithPassword(email, pass);
+			return this.setup(authData, "password");
+		} catch (e) {
+			void this.pb.realtime.unsubscribe();
+			throw e;
+		}
+	}
+
+	async registerWithPassword(email: string, pass: string, name?: string): Promise<boolean> {
+		await this.pb.collection("users").create({
+			email: email,
+			password: pass,
+			passwordConfirm: pass,
+			name: name || email.split("@")[0],
+		});
+		return this.loginWithPassword(email, pass);
 	}
 
 	async openLoginPage() {
